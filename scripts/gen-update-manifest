@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# 生成应用内更新版本清单 android.json（issue #12，设计文档 7.6 / docs/update-manifest.md）。
+#
+# 用法：
+#   scripts/gen-update-manifest --version-code 101 --version-name 1.0.1 \
+#     --apk release/tire-1.0.1-101.apk --service-commit <sha> \
+#     [--min-version-code 100] [--notes "更新说明"] \
+#     [--url /downloads/tire-1.0.1-101.apk] [--out release/android.json] \
+#     [--record release/versions.tsv]
+#   scripts/gen-update-manifest --self-test   # 运行脚本自测
+#
+# 输出：
+#   1. android.json —— 按发布流程上传到 APK 同域的 /downloads/android.json
+#   2. 发布记录追加一行到 release/versions.tsv，含 APK SHA256（设计文档 3.1 的发版记录）
+set -euo pipefail
+
+SCRIPT_NAME="gen-update-manifest"
+
+die() {
+  echo "✖ [$SCRIPT_NAME] $1" >&2
+  exit 1
+}
+
+log() {
+  echo "✔ [$SCRIPT_NAME] $1"
+}
+
+usage() {
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  exit 1
+}
+
+# 兼容 macOS / Linux 的 SHA256 计算
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
+# 用 python3 校验 JSON 字段（无 python3 时退化为 grep 关键字段检查）
+json_fields_ok() {
+  local file="$1" version_code="$2" version_name="$3" min_code="$4" url="$5"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$version_code" "$version_name" "$min_code" "$url" <<'PY'
+import json, sys
+path, code, name, min_code, url = sys.argv[1:6]
+with open(path) as f:
+    m = json.load(f)
+assert m["versionCode"] == int(code), "versionCode mismatch"
+assert m["versionName"] == name, "versionName mismatch"
+assert m["minVersionCode"] == int(min_code), "minVersionCode mismatch"
+assert m["url"] == url, "url mismatch"
+assert isinstance(m["versionCode"], int), "versionCode must be int"
+assert isinstance(m["minVersionCode"], int), "minVersionCode must be int"
+PY
+  else
+    grep -q "\"versionCode\": ${version_code}," "$file" \
+      && grep -q "\"versionName\": \"${version_name}\"" "$file" \
+      && grep -q "\"minVersionCode\": ${min_code}," "$file" \
+      && grep -q "\"url\": \"${url}\"" "$file"
+  fi
+}
+
+is_positive_int() {
+  [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -gt 0 ]
+}
+
+is_non_negative_int() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+is_version_name() {
+  [[ "$1" =~ ^[0-9]+(\.[0-9]+){0,3}(-[0-9A-Za-z.-]+)?$ ]]
+}
+
+is_service_commit() {
+  [[ "$1" =~ ^[0-9a-f]{7,40}$ ]]
+}
+
+# url 合法：绝对地址必须 http(s)://（生产要求 https，http 仅内测）；根相对路径以 / 开头
+is_url() {
+  [[ "$1" =~ ^https?://[^[:space:]]+$ ]] || [[ "$1" =~ ^/[^[:space:]]*$ ]]
+}
+
+generate() {
+  local version_code="" version_name="" apk="" service_commit=""
+  local min_version_code="" notes="" url="" out="release/android.json" record="release/versions.tsv"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --version-code) version_code="${2:-}"; shift 2 ;;
+      --version-name) version_name="${2:-}"; shift 2 ;;
+      --apk) apk="${2:-}"; shift 2 ;;
+      --service-commit) service_commit="${2:-}"; shift 2 ;;
+      --min-version-code) min_version_code="${2:-}"; shift 2 ;;
+      --notes) notes="${2:-}"; shift 2 ;;
+      --url) url="${2:-}"; shift 2 ;;
+      --out) out="${2:-}"; shift 2 ;;
+      --record) record="${2:-}"; shift 2 ;;
+      *) die "未知参数：${1}（--help 查看用法）" ;;
+    esac
+  done
+
+  # 必填字段校验：缺字段 / 类型不符一律拒绝，宁可失败也不生成能闪退司机的清单
+  is_positive_int "$version_code" || die "--version-code 必须为正整数（manifest.json 的 versionCode）"
+  is_version_name "$version_name" || die "--version-name 必须为语义化版本，如 1.0.1"
+  [ -n "$service_commit" ] || die "缺少 --service-commit（service 仓打包所用 commit）"
+  is_service_commit "$service_commit" || die "--service-commit 必须是 7~40 位 commit sha"
+  [ -n "$apk" ] || die "缺少 --apk（APK 文件路径）"
+  [ -f "$apk" ] || die "APK 不存在：$apk"
+  if [ -z "$min_version_code" ]; then
+    min_version_code=0   # 默认不强制：全部走可选更新；需要强更时显式传值
+  fi
+  is_non_negative_int "$min_version_code" || die "--min-version-code 必须为非负整数"
+  [ "$min_version_code" -le "$version_code" ] || die "--min-version-code 不能大于 --version-code（否则连最新版也会被判强制更新）"
+  if [ -z "$url" ]; then
+    url="/downloads/$(basename "$apk")"   # 默认与清单同域：客户端按清单域名补全
+  fi
+  is_url "$url" || die "--url 必须是 http(s):// 绝对地址或 / 开头的根相对路径"
+  case "$url" in
+    http://*) echo "⚠ [$SCRIPT_NAME] url 为明文 http，仅限内测域名；生产必须 https" >&2 ;;
+  esac
+
+  local sha256
+  sha256="$(sha256_of "$apk")"
+  [ -n "$sha256" ] || die "计算 APK SHA256 失败"
+
+  mkdir -p "$(dirname "$out")" "$(dirname "$record")"
+  # notes 里的双引号转成 \"，保证 JSON 合法
+  local notes_json
+  notes_json="${notes//\\/\\\\}"
+  notes_json="${notes_json//\"/\\\"}"
+  cat > "$out" <<EOF
+{
+  "versionCode": ${version_code},
+  "versionName": "${version_name}",
+  "url": "${url}",
+  "notes": "${notes_json}",
+  "minVersionCode": ${min_version_code}
+}
+EOF
+  json_fields_ok "$out" "$version_code" "$version_name" "$min_version_code" "$url" \
+    || die "生成的 android.json 字段校验失败，请检查脚本模板"
+
+  # 发布记录：时间 versionCode versionName minVersionCode serviceCommit sha256 apk url（TSV）
+  if [ ! -f "$record" ]; then
+    printf 'generatedAt\tversionCode\tversionName\tminVersionCode\tserviceCommit\tsha256\tapk\turl\n' > "$record"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$version_code" "$version_name" \
+    "$min_version_code" "$service_commit" "$sha256" "$(basename "$apk")" "$url" >> "$record"
+
+  log "已生成 ${out}（versionCode=${version_code} versionName=${version_name} minVersionCode=${min_version_code}）"
+  log "APK SHA256：${sha256}，已记录到 ${record}"
+  log "发布时把 $out 上传到 APK 同域的 /downloads/android.json（docs/update-manifest.md）"
+}
+
+self_test() {
+  # tmp 不能是 local：EXIT trap 在函数返回后执行 rm，local 变量已出作用域会触发 set -u
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  local apk="$tmp/tire-9.9.9-999.apk" out="$tmp/android.json" record="$tmp/versions.tsv"
+  printf 'fake-apk-bytes-for-issue-12-self-test' > "$apk"
+  local expect_sha
+  expect_sha="$(sha256_of "$apk")"
+
+  # 1. 合法参数：生成成功，字段与 SHA256 正确
+  generate --version-code 999 --version-name 9.9.9 --apk "$apk" \
+    --service-commit abc1234 --min-version-code 990 --notes '修复"闪退"与体验优化' \
+    --out "$out" --record "$record" > "$tmp/log1" 2>&1 \
+    || die "自测失败：合法参数应生成成功"
+  json_fields_ok "$out" 999 9.9.9 990 "/downloads/$(basename "$apk")" \
+    || die "自测失败：生成的 android.json 字段不正确"
+  grep -q "$expect_sha" "$record" || die "自测失败：发布记录缺少 APK SHA256"
+
+  # 2. 缺 --version-code：拒绝且不产出文件
+  # 注意：拒绝路径走 die（exit 1），必须放在子 shell 里跑，否则会终止整个自测
+  local out2="$tmp/android2.json"
+  if (generate --version-name 9.9.9 --apk "$apk" --service-commit abc1234 \
+    --out "$out2" --record "$record") > "$tmp/log2" 2>&1; then
+    die "自测失败：缺 --version-code 应拒绝"
+  fi
+  [ -f "$out2" ] && die "自测失败：被拒绝的调用不应写出 android.json"
+
+  # 3. 缺 --apk：拒绝
+  if (generate --version-code 999 --version-name 9.9.9 --service-commit abc1234 \
+    --out "$out2" --record "$record") > "$tmp/log3" 2>&1; then
+    die "自测失败：缺 --apk 应拒绝"
+  fi
+
+  # 4. 非法 versionCode：拒绝
+  if (generate --version-code abc --version-name 9.9.9 --apk "$apk" --service-commit abc1234 \
+    --out "$out2" --record "$record") > "$tmp/log4" 2>&1; then
+    die "自测失败：非整数 versionCode 应拒绝"
+  fi
+
+  # 5. APK 文件不存在：拒绝
+  if (generate --version-code 999 --version-name 9.9.9 --apk "$tmp/not-exist.apk" \
+    --service-commit abc1234 --out "$out2" --record "$record") > "$tmp/log5" 2>&1; then
+    die "自测失败：APK 不存在应拒绝"
+  fi
+
+  # 6. minVersionCode 大于 versionCode：拒绝
+  if (generate --version-code 999 --version-name 9.9.9 --apk "$apk" --service-commit abc1234 \
+    --min-version-code 1000 --out "$out2" --record "$record") > "$tmp/log6" 2>&1; then
+    die "自测失败：minVersionCode > versionCode 应拒绝"
+  fi
+
+  # 7. 非法 service commit：拒绝
+  if (generate --version-code 999 --version-name 9.9.9 --apk "$apk" --service-commit "not-a-sha!" \
+    --out "$out2" --record "$record") > "$tmp/log7" 2>&1; then
+    die "自测失败：非法 service commit 应拒绝"
+  fi
+
+  log "自测通过：合法参数生成成功、缺字段与非法参数均被拒绝"
+}
+
+main() {
+  case "${1:-}" in
+    --self-test) self_test ;;
+    --help|-h|'') usage ;;
+    *) generate "$@" ;;
+  esac
+}
+
+main "$@"
