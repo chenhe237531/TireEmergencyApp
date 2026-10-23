@@ -1,0 +1,66 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 版本号来源：android/version.properties（发版时与 service 仓 apps/miniapp/src/manifest.json 保持一致，
+// 由 node scripts/release.mjs validate 校验 VERSION_CODE 不低于 release/records/ 历史最大值）
+def versionProps = new Properties()
+def versionPropsFile = rootProject.file('version.properties')
+if (versionPropsFile.exists()) {
+    versionPropsFile.withInputStream { versionProps.load(it) }
+}
+def appVersionCode = (versionProps.getProperty('VERSION_CODE') ?: '1') as Integer
+def appVersionName = versionProps.getProperty('VERSION_NAME') ?: '1.0.0'
+
+android {
+    // 暂定包名：上架前必须替换为公司自有域名倒序（见 android/README.md）。
+    // 包名一经上架不可更改，高德 Key 绑定包名 + 签名 SHA1，替换后需同步更换。
+    namespace 'com.xiaomayi.tire'
+    // compileSdk / targetSdk 以商店要求与 DCloud 离线 SDK 实际支持为准（设计文档 §10：商店要求 targetSdk 35）
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.xiaomayi.tire'
+        minSdk 21
+        targetSdk 35
+        versionCode appVersionCode
+        versionName appVersionName
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+    }
+
+    signingConfigs {
+        release {
+            // 真实签名信息放 android/signing.properties（不入库），模板见 android/signing-template.properties
+            def signingPropsFile = rootProject.file('signing.properties')
+            if (signingPropsFile.exists()) {
+                def signingProps = new Properties()
+                signingPropsFile.withInputStream { signingProps.load(it) }
+                storeFile signingPropsFile.parentFile.toPath().resolve(signingProps.getProperty('storeFile')).toFile()
+                storePassword signingProps.getProperty('storePassword')
+                keyAlias signingProps.getProperty('keyAlias')
+                keyPassword signingProps.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    // DCloud 离线打包 SDK 为授权产物，不入库（app/libs/ 已 gitignore）：
+    // 从 https://nativesupport.dcloud.net.cn/AppDocs/download/android 下载后，
+    // 将 aar 放入 app/libs/，由下行引入；前端资源放入 app/src/main/assets/apps/<APPID>/www
+    implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
+}

@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: 发布记录与工程红线校验
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: 发布记录 schema 与 versionCode 单调递增校验
+        run: node scripts/release.mjs validate
+
+      - name: 版本工具自测（node:test）
+        run: node --test scripts/tests/*.test.mjs
+
+      - name: 禁止 APK / 签名材料入库检查
+        run: bash scripts/check-artifacts.sh
