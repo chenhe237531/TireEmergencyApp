@@ -48,7 +48,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.release
+            // signing.properties 存在时才启用正式签名；缺失时产出未签名 APK（app-release-unsigned.apk），
+            // 供 CI 构建验证或事后 apksigner 签名（keystore 安全见 android/README.md）
+            if (rootProject.file('signing.properties').exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 

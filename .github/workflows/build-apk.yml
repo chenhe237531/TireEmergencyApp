@@ -1,0 +1,239 @@
+# 手动构建 APK：Actions → Build APK → Run workflow。
+# 构建类型（build_type 输入）：
+#   - release：正式包。配齐签名 Secrets 则正式签名；全部留空产出未签名 APK（不能直接安装）。
+#   - debug  ：测试包。AGP 自动用 debug keystore 签名，无需任何 Secrets，可直接安装；
+#              不可上架，与正式签名不同，不能覆盖安装正式包。
+#
+# 一次性前置配置：
+# 1. 签名 Secrets（Settings → Secrets and variables → Actions，仅 release 需要，可选；
+#    不配置时产出未签名 APK —— 不能直接安装，供 CI 验证或事后 apksigner 签名）：
+#    - ANDROID_KEYSTORE_BASE64   keystore 文件 base64（linux/mac: base64 tire-release.jks 后粘贴输出）
+#    - ANDROID_STORE_PASSWORD    对应 signing-template.properties 的 storePassword
+#    - ANDROID_KEY_ALIAS         keyAlias
+#    - ANDROID_KEY_PASSWORD      keyPassword
+#    keystore 生成方法见 android/signing-template.properties，材料禁止入库（issue #11）。
+# 2. DCloud 离线 SDK（授权产物不入库，见 android/README.md），二选一：
+#    - 每次运行时在「DCloud SDK 下载地址」填官方 zip 直链；或
+#    - 上传一次 zip 到本仓 release（tag = sdk，附件名 dcloud-sdk.zip），运行时留空自动下载。
+
+name: Build APK
+
+run-name: 'APK·${{ inputs.build_type }}·${{ inputs.build_profile }} · service@${{ inputs.service_ref }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_ref:
+        description: 'service 仓分支 / commit（前端资源构建所依据的版本）'
+        required: true
+        default: 'main'
+      build_type:
+        description: 'release：正式包（配 Secrets 则正式签名，否则未签名包）；debug：测试包（debug 签名可直接安装，无需 Secrets）'
+        type: choice
+        default: 'release'
+        options: ['release', 'debug']
+      build_profile:
+        description: '前端构建模式（test 用 env/.env.test，prod 用 env/.env.production）'
+        type: choice
+        default: 'prod'
+        options: ['prod', 'test']
+      server_baseurl:
+        description: '覆盖 VITE_APP_SERVER_BASEURL；service 仓 .env.production 当前为占位地址，正式构建建议填写'
+        required: false
+      sdk_url:
+        description: 'DCloud 离线 SDK zip 直链；留空则用本仓 sdk tag 的 release 附件 dcloud-sdk.zip'
+        required: false
+      gradle_version:
+        description: 'Gradle 版本（以 DCloud SDK 文档要求为准，须满足 AGP 8.6.1 最低要求 8.7）'
+        default: '8.7'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建 APK（${{ inputs.build_type }}）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: 拉取本仓（安卓打包工程）
+        uses: actions/checkout@v7
+
+      - name: 拉取 service 仓（UI 源码）
+        uses: actions/checkout@v7
+        with:
+          repository: chenhe237531/TireEmergencyService
+          ref: ${{ inputs.service_ref }}
+          path: service
+          token: ${{ secrets.SERVICE_REPO_TOKEN || github.token }}
+
+      - name: 记录 service 仓 commit
+        run: echo "SERVICE_SHA=$(git -C service rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - name: 安装 Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: service/pnpm-lock.yaml
+
+      - name: 安装前端依赖
+        working-directory: service
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建 uni-app 前端资源（app 平台）
+        working-directory: service
+        env:
+          SERVER_BASEURL: ${{ inputs.server_baseurl }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SERVER_BASEURL" ]; then
+            export VITE_APP_SERVER_BASEURL="$SERVER_BASEURL"
+          fi
+          # src/manifest.json、src/pages.json 不入库，由 init-baseFiles 从 config 生成
+          pnpm --filter tire-miniapp init-baseFiles
+          pnpm --filter tire-miniapp build:app:${{ inputs.build_profile }}
+
+      - name: 前端资源放入离线工程
+        run: |
+          set -euo pipefail
+          # appid 与 service 仓 apps/miniapp/src/manifest.json 的 appid 保持一致（ADR-0003）
+          www=android/app/src/main/assets/apps/__UNI__TIRE001/www
+          mkdir -p "$www"
+          cp -a service/apps/miniapp/dist/build/app/. "$www/"
+          ls -la "$www"
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ inputs.gradle_version }}
+
+      - name: 获取 DCloud 离线 SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_URL: ${{ inputs.sdk_url }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SDK_URL" ]; then
+            curl -fL --retry 3 -o /tmp/dcloud-sdk.zip "$SDK_URL"
+          else
+            echo "未指定 sdk_url，尝试本仓 release（tag=sdk）附件 dcloud-sdk.zip"
+            gh release download sdk --repo "$GITHUB_REPOSITORY" \
+              --pattern 'dcloud-sdk*.zip' --output /tmp/dcloud-sdk.zip
+          fi
+          mkdir -p /tmp/dcloud-sdk-unzipped
+          unzip -q /tmp/dcloud-sdk.zip -d /tmp/dcloud-sdk-unzipped
+          # SDK zip 内目录层级不定，定位包含 libs/ 的目录
+          libs_dir=$(find /tmp/dcloud-sdk-unzipped -type d -name libs -print -quit)
+          if [ -z "$libs_dir" ]; then
+            echo "::error::SDK zip 内未找到 libs/ 目录，请确认地址指向 DCloud App 离线打包 SDK" >&2
+            exit 1
+          fi
+          sdk_dir=$(dirname "$libs_dir")
+          mkdir -p android/app/libs
+          find "$libs_dir" \( -name '*.aar' -o -name '*.jar' \) -exec cp -t android/app/libs/ {} +
+          # SDK 的 assets/data 与 res 用 no-clobber 合并，保留本仓已定制的 dcloud_control.xml / themes.xml
+          if [ -d "$sdk_dir/assets/data" ]; then
+            cp -rn "$sdk_dir"/assets/data/. android/app/src/main/assets/data/
+          fi
+          if [ -d "$sdk_dir/res" ]; then
+            cp -rn "$sdk_dir"/res/. android/app/src/main/res/
+          fi
+          echo '已注入的 SDK 构件：'
+          ls -l android/app/libs/
+
+      - name: 生成占位启动图标（仓库未收录二进制图标时）
+        run: |
+          set -euo pipefail
+          res=android/app/src/main/res
+          if [ ! -e "$res/mipmap-xxxhdpi/ic_launcher.png" ]; then
+            # android/README.md：仓库不收录二进制图标；构建期生成纯色占位，上架前替换品牌图标
+            if command -v convert >/dev/null 2>&1; then im() { convert "$@"; }; else im() { magick "$@"; }; fi
+            for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+              density=${spec%:*}; size=${spec#*:}
+              mkdir -p "$res/mipmap-$density"
+              im -size "${size}x${size}" xc:'#3478F6' "$res/mipmap-$density/ic_launcher.png"
+            done
+            echo '已生成占位 ic_launcher（上架前替换品牌图标，见 android/README.md）'
+          fi
+
+      - name: 还原签名材料（来自 Secrets）
+        if: inputs.build_type == 'release'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] && [ -z "$STORE_PASSWORD" ] && [ -z "$KEY_ALIAS" ] && [ -z "$KEY_PASSWORD" ]; then
+            # 未配置任何签名 Secrets：跳过签名，产出未签名 APK（app-release-unsigned.apk）
+            echo "::warning::未配置签名 Secrets，本次产出未签名 APK：不能直接安装，供 CI 验证或事后 apksigner 签名"
+            exit 0
+          fi
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::签名 Secrets 配置不完整：需同时配置 ANDROID_KEYSTORE_BASE64 / ANDROID_STORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD，或全部留空构建未签名包（配置方法见本 workflow 顶部注释）" >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/tire-release.jks
+          cat > android/signing.properties <<PROPS
+          storeFile=tire-release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          PROPS
+          # 校验 keystore 与口令可用
+          keytool -list -keystore android/tire-release.jks -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null
+
+      - name: 构建 APK
+        working-directory: android
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          set -euo pipefail
+          # debug：AGP 自动用 ~/.android/debug.keystore 签名，无需任何 Secrets
+          gradle "assemble${BUILD_TYPE^}" --no-daemon --stacktrace
+
+      - name: 输出构建摘要（供 release/records/ 记录使用）
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          set -euo pipefail
+          apks=(android/app/build/outputs/apk/$BUILD_TYPE/*.apk)
+          apk=${apks[0]}
+          version_name=$(sed -n 's/^VERSION_NAME=//p' android/version.properties)
+          version_code=$(sed -n 's/^VERSION_CODE=//p' android/version.properties)
+          {
+            echo "## APK 构建结果（$BUILD_TYPE）"
+            echo "- 版本：$version_name（versionCode $version_code）"
+            echo "- service commit：$SERVICE_SHA"
+            echo "- apkSha256：$(sha256sum "$apk" | cut -d' ' -f1)"
+            if [[ "$BUILD_TYPE" == debug ]]; then
+              echo "- 签名：debug 自动签名，测试包可直接安装；不可上架，不能覆盖安装正式包"
+            elif [[ "$apk" == *-unsigned.apk ]]; then
+              echo "- 签名：未签名 APK（app-release-unsigned.apk），安装前需 apksigner 签名"
+            else
+              echo "- 签名指纹（signingSha1 / signingSha256）："
+              echo '```'
+              keytool -list -printcert -jarfile "$apk" | grep -E 'SHA1:|SHA256:' || true
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ inputs.build_type }}-apk
+          path: android/app/build/outputs/apk/${{ inputs.build_type }}/*.apk
+          if-no-files-found: error
