@@ -1,0 +1,4 @@
+<resources>
+    <!-- 应用名（设计文档 §8.2）：小蚂蚁轮胎救援 -->
+    <string name="app_name">小蚂蚁轮胎救援</string>
+</resources>

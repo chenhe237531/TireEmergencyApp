@@ -1,0 +1,8 @@
+<!-- DCloud 离线打包运行时控制文件。
+     appid：与 service 仓 apps/miniapp/src/manifest.json 的 appid 一致（DCloud 正式 AppID 就绪后替换）；
+     appver：与 android/version.properties 的 VERSION_NAME 保持一致。 -->
+<hbuilder>
+<apps>
+    <app appid="__UNI__TIRE001" appver="1.0.0" />
+</apps>
+</hbuilder>

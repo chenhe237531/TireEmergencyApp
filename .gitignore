@@ -1,0 +1,24 @@
+# 签名材料与构建产物，禁止入库（issue #11；CI 由 scripts/check-artifacts.sh 兜底断言）
+*.apk
+*.aab
+*.jks
+*.keystore
+*.jceks
+*.p12
+*.pem
+signing.properties
+
+# DCloud 离线打包 SDK 为授权产物，不入库（见 android/README.md）
+android/app/libs/
+
+# Android 构建输出与本地配置
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+gradle-wrapper.jar
+*.iml
+.idea/
+
+# Node
+node_modules/

@@ -1,0 +1,6 @@
+<resources>
+    <!-- 启动主题；DCloud 5+ 运行时启动页在此基础上渲染（SDK 放入后按需调整） -->
+    <style name="DCloudTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>
