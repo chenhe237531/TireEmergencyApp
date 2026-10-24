@@ -1,5 +1,5 @@
 // 顶层构建文件。AGP / Gradle 版本需与 DCloud 离线打包 SDK 的官方要求匹配，
 // 放入 SDK 后以其文档为准调整（见 android/README.md「接入 DCloud 离线 SDK」）。
 plugins {
-    id 'com.android.application' version '8.6.1' apply false
+    id 'com.android.application' version '8.7.3' apply false
 }
