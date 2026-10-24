@@ -153,6 +153,11 @@ jobs:
           fi
           echo '已注入的 SDK 构件：'
           ls -l android/app/libs/
+          # 硬校验：DCloud 运行时核心构件必须存在，防止上游 zip 残缺时产出空壳 APK
+          if [ ! -e android/app/libs/lib.5plus.base-release.aar ]; then
+            echo "::error::SDK 注入校验失败：android/app/libs/ 缺少 lib.5plus.base-release.aar，下载的 SDK zip 可能不完整" >&2
+            exit 1
+          fi
 
       - name: 生成占位启动图标（仓库未收录二进制图标时）
         run: |
@@ -216,6 +221,26 @@ jobs:
           set -euo pipefail
           # debug：AGP 自动用 ~/.android/debug.keystore 签名，无需任何 Secrets
           gradle "assemble${BUILD_TYPE^}" --no-daemon --stacktrace
+
+      - name: 产物完整性校验（防空壳 APK）
+        env:
+          BUILD_TYPE: ${{ inputs.build_type }}
+        run: |
+          set -euo pipefail
+          apks=(android/app/build/outputs/apk/$BUILD_TYPE/*.apk)
+          apk=${apks[0]}
+          listing=$(unzip -l "$apk")
+          # uni-app 前端资源与 DCloud 运行时资源缺一不可，否则装上必白屏
+          echo "$listing" | grep -q 'assets/apps/__UNI__TIRE001/www/app-service.js' \
+            || { echo "::error::APK 缺少 uni-app 前端资源（assets/apps），检查 aaptOptions ignoreAssetsPattern" >&2; exit 1; }
+          echo "$listing" | grep -q 'assets/data/dcloud_properties.xml' \
+            || { echo "::error::APK 缺少 DCloud 运行时资源（assets/data），检查 SDK 注入步骤" >&2; exit 1; }
+          size=$(stat -c%s "$apk")
+          if [ "$size" -lt 2097152 ]; then
+            echo "::error::APK 仅 $size 字节，疑似空壳（正常应 > 50MB）" >&2
+            exit 1
+          fi
+          echo "完整性校验通过：APK $size 字节，含前端资源与 DCloud 运行时"
 
       - name: 输出构建摘要（供 release/records/ 记录使用）
         env:

@@ -25,6 +25,7 @@ android {
         targetSdk 35
         versionCode appVersionCode
         versionName appVersionName
+        multiDexEnabled true
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a'
         }
@@ -56,6 +57,14 @@ android {
         }
     }
 
+    // DCloud 官方离线打包要求（HBuilder-Integrate-AS 示例工程）：
+    // 默认 ignoreAssetsPattern 含 <dir>_*，会忽略 appid 目录 assets/apps/__UNI__TIRE001/，
+    // 导致前端资源不进 APK；ignoreAssetsPattern 必须去掉该段。
+    aaptOptions {
+        additionalParameters '--auto-add-overlay'
+        ignoreAssetsPattern "!.svn:!.git:.*:!CVS:!thumbs.db:!picasa.ini:!*.scc:*~"
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -67,4 +76,15 @@ dependencies {
     // 从 https://nativesupport.dcloud.net.cn/AppDocs/download/android 下载后，
     // 将 aar 放入 app/libs/，由下行引入；前端资源放入 app/src/main/assets/apps/<APPID>/www
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
+    // DCloud 5+ 运行时依赖的第三方库（版本与官方示例工程一致，见 HBuilder-Integrate-AS/simpleDemo）
+    implementation 'androidx.appcompat:appcompat:1.1.0'
+    implementation 'androidx.localbroadcastmanager:localbroadcastmanager:1.0.0'
+    implementation 'androidx.core:core:1.1.0'
+    implementation 'androidx.fragment:fragment:1.1.0'
+    implementation 'androidx.recyclerview:recyclerview:1.1.0'
+    implementation 'com.facebook.fresco:fresco:2.5.0'
+    implementation 'com.facebook.fresco:animated-gif:2.5.0'
+    implementation 'com.github.bumptech.glide:glide:4.9.0'
+    implementation 'com.alibaba:fastjson:1.2.83'
+    implementation 'androidx.webkit:webkit:1.5.0'
 }
