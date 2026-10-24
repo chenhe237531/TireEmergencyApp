@@ -159,6 +159,7 @@ jobs:
             utsplugin-release.aar
             android-gif-drawable-1.2.29.aar
             install-apk-release.aar
+            oaid_sdk_1.0.25.aar
             uni-chooseMedia-release.aar
             uni-createRequestPermissionListener-release.aar
             uni-exit-release.aar
@@ -273,6 +274,11 @@ jobs:
           apks=(android/app/build/outputs/apk/$BUILD_TYPE/*.apk)
           apk=${apks[0]}
           listing=$(unzip -l "$apk")
+          # 取证输出：assets 是否进包、在哪一环丢弃，失败时可直接从日志定位
+          echo '== APK 内容（assets 相关行）:'
+          echo "$listing" | grep -E 'assets/|AndroidManifest|\.dex|lib/' | head -40 || true
+          echo '== 资产合并中间产物（mergeAssets 输出）:'
+          find android/app/build/intermediates/assets/$BUILD_TYPE -maxdepth 4 2>/dev/null | head -30 || true
           # uni-app 前端资源与 DCloud 运行时资源缺一不可，否则装上必白屏
           echo "$listing" | grep -q 'assets/apps/__UNI__TIRE001/www/app-service.js' \
             || { echo "::error::APK 缺少 uni-app 前端资源（assets/apps），检查 aaptOptions ignoreAssetsPattern" >&2; exit 1; }
