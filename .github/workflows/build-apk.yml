@@ -109,7 +109,7 @@ jobs:
           ls -la "$www"
 
       - name: 安装 JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -159,14 +159,24 @@ jobs:
           set -euo pipefail
           res=android/app/src/main/res
           if [ ! -e "$res/mipmap-xxxhdpi/ic_launcher.png" ]; then
-            # android/README.md：仓库不收录二进制图标；构建期生成纯色占位，上架前替换品牌图标
-            if command -v convert >/dev/null 2>&1; then im() { convert "$@"; }; else im() { magick "$@"; }; fi
-            for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-              density=${spec%:*}; size=${spec#*:}
-              mkdir -p "$res/mipmap-$density"
-              im -size "${size}x${size}" xc:'#3478F6' "$res/mipmap-$density/ic_launcher.png"
-            done
-            echo '已生成占位 ic_launcher（上架前替换品牌图标，见 android/README.md）'
+            # android/README.md：仓库不收录二进制图标；构建期生成纯色占位，上架前替换品牌图标。
+            # runner 无 ImageMagick，用 python3 标准库直接写最小 PNG（8-bit 真彩纯色 #3478F6）
+            python3 - "$res" <<'PY'
+            import struct, sys, zlib
+            from pathlib import Path
+            res = Path(sys.argv[1])
+            def chunk(tag, data):
+                return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+            def png(size):
+                ihdr = struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)
+                row = b'\x00' + b'\x34\x78\xf6' * size
+                return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(row * size, 9)) + chunk(b'IEND', b'')
+            for density, px in {'mdpi':48, 'hdpi':72, 'xhdpi':96, 'xxhdpi':144, 'xxxhdpi':192}.items():
+                d = res / f'mipmap-{density}'
+                d.mkdir(parents=True, exist_ok=True)
+                (d / 'ic_launcher.png').write_bytes(png(px))
+            print('已生成占位 ic_launcher（上架前替换品牌图标，见 android/README.md）')
+            PY
           fi
 
       - name: 还原签名材料（来自 Secrets）
