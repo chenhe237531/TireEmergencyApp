@@ -67,6 +67,14 @@ android {
         ignoreAssetsPattern "!.svn:!.git:.*:!CVS:!thumbs.db:!picasa.ini:!*.scc:*~"
     }
 
+    // uniapp-v8-release.aar 清单声明 android:extractNativeLibs="true"（原生加载器依赖解压后的 .so），
+    // 应用侧未声明时 AGP 8 清单合并报错；useLegacyPackaging 令应用清单与其对齐
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
