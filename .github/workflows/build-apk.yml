@@ -149,31 +149,35 @@ jobs:
           # dex 阶段还会撞 Duplicate class，且 APK 体积与上架合规（广告 SDK 收集设备标识）都有问题。
           # 本应用仅用到：基础运行时 + uni API 模块（storage/prompt/network/location/系统信息/拍照上传/应用内更新）；
           # 新页面用到其他原生能力（地图、推送、分享等）时，把对应 aar 加进下面的清单。
-          INCLUDE_AARS='lib.5plus.base-release.aar
-uniapp-v8-release.aar
-breakpad-build-release.aar
-debug-server-release.aar
-utsplugin-release.aar
-android-gif-drawable-1.2.29.aar
-install-apk-release.aar
-uni-chooseMedia-release.aar
-uni-createRequestPermissionListener-release.aar
-uni-exit-release.aar
-uni-getAccessibilityInfo-release.aar
-uni-getAppAuthorizeSetting-release.aar
-uni-getAppBaseInfo-release.aar
-uni-getDeviceInfo-release.aar
-uni-getLocation-tencent-uni1-release.aar
-uni-getNetworkType-release.aar
-uni-getSystemInfo-release.aar
-uni-getSystemSetting-release.aar
-uni-installApk-release.aar
-uni-network-release.aar
-uni-openAppAuthorizeSetting-release.aar
-uni-prompt-release.aar
-uni-storage-release.aar'
+          # 注意：YAML 块标量内所有行必须保持缩进，续行无缩进会破坏 workflow 解析；
+          # 读取时用 tr 去除行内空白
+          INCLUDE_AARS='
+            lib.5plus.base-release.aar
+            uniapp-v8-release.aar
+            breakpad-build-release.aar
+            debug-server-release.aar
+            utsplugin-release.aar
+            android-gif-drawable-1.2.29.aar
+            install-apk-release.aar
+            uni-chooseMedia-release.aar
+            uni-createRequestPermissionListener-release.aar
+            uni-exit-release.aar
+            uni-getAccessibilityInfo-release.aar
+            uni-getAppAuthorizeSetting-release.aar
+            uni-getAppBaseInfo-release.aar
+            uni-getDeviceInfo-release.aar
+            uni-getLocation-tencent-uni1-release.aar
+            uni-getNetworkType-release.aar
+            uni-getSystemInfo-release.aar
+            uni-getSystemSetting-release.aar
+            uni-installApk-release.aar
+            uni-network-release.aar
+            uni-openAppAuthorizeSetting-release.aar
+            uni-prompt-release.aar
+            uni-storage-release.aar'
           missing=0
           while IFS= read -r aar; do
+            aar=$(printf '%s' "$aar" | tr -d '[:space:]')
             [ -z "$aar" ] && continue
             if [ -e "$libs_dir/$aar" ]; then
               cp "$libs_dir/$aar" android/app/libs/
