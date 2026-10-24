@@ -64,7 +64,13 @@ android {
     // 导致前端资源不进 APK；ignoreAssetsPattern 必须去掉该段。
     aaptOptions {
         additionalParameters '--auto-add-overlay'
-        ignoreAssetsPattern "!.svn:!.git:.*:!CVS:!thumbs.db:!picasa.ini:!*.scc:*~"
+    }
+    // ignoreAssetsPattern 必须用 AGP 8 的 androidResources 新 DSL 声明（aaptOptions 旧 DSL 在
+    // AGP 8.7 下不生效，默认 pattern 的 <dir>_* 会把 assets/apps/__UNI__TIRE001（'_' 开头目录）
+    // 在资产合并阶段整体丢弃，产出空壳白屏 APK）；
+    // 这里 pattern 全否定 = 不忽略任何文件（.svn/.git 等本就不在源码树）
+    androidResources {
+        ignoreAssetsPattern '!.svn:!.git:!CVS:!thumbs.db:!picasa.ini:!*.scc:!~*.*'
     }
 
     // uniapp-v8-release.aar 清单声明 android:extractNativeLibs="true"（原生加载器依赖解压后的 .so），
