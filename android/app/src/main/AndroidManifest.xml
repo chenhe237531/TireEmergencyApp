@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 权限清单与 service 仓 apps/miniapp/src/manifest.json 的
          app-plus.distribute.android.permissions 保持一致（ADR-0003：app-plus 配置随 UI 源码维护） -->
@@ -21,12 +22,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- tools:replace：DCloud SDK 的 ads-hw-release.aar 声明 usesCleartextTraffic="true"，
+         会与这里的 false 冲突导致清单合并失败；后端为 HTTPS（云托管），显式覆盖保持禁用明文流量 -->
     <application
         android:name="io.dcloud.application.DCloudApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        tools:replace="android:usesCleartextTraffic">
 
         <!-- 高德 Key 绑定「包名 + 签名 SHA1」；待 Key 就绪后填入，替换暂定包名或签名后必须同步更换 -->
         <meta-data
