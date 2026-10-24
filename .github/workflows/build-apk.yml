@@ -276,14 +276,14 @@ jobs:
           listing=$(unzip -l "$apk")
           # 取证输出：assets 是否进包、在哪一环丢弃，失败时可直接从日志定位
           echo '== APK 内容（assets 相关行）:'
-          echo "$listing" | grep -E 'assets/|AndroidManifest|\.dex|lib/' | head -40 || true
-          echo '== 资产合并中间产物（mergeAssets 输出）:'
-          find android/app/build/intermediates/assets/$BUILD_TYPE -maxdepth 4 2>/dev/null | head -30 || true
-          # uni-app 前端资源与 DCloud 运行时资源缺一不可，否则装上必白屏
-          echo "$listing" | grep -q 'assets/apps/__UNI__TIRE001/www/app-service.js' \
-            || { echo "::error::APK 缺少 uni-app 前端资源（assets/apps），检查 aaptOptions ignoreAssetsPattern" >&2; exit 1; }
-          echo "$listing" | grep -q 'assets/data/dcloud_properties.xml' \
-            || { echo "::error::APK 缺少 DCloud 运行时资源（assets/data），检查 SDK 注入步骤" >&2; exit 1; }
+          grep -E 'assets/|AndroidManifest|\.dex' <<<"$listing" | head -40 || true
+          # uni-app 前端资源与 DCloud 运行时资源缺一不可，否则装上必白屏。
+          # 注意不能用 `echo "$listing" | grep -q`：pipefail 下 grep -q 命中即提前退出，
+          # echo 收到 SIGPIPE(141) 会让整个管道判失败，明明资源在包里却误报缺失
+          grep -q 'assets/apps/__UNI__TIRE001/www/app-service.js' <<<"$listing" \
+            || { echo "::error::APK 缺少 uni-app 前端资源（assets/apps）" >&2; exit 1; }
+          grep -q 'assets/data/dcloud_properties.xml' <<<"$listing" \
+            || { echo "::error::APK 缺少 DCloud 运行时资源（assets/data）" >&2; exit 1; }
           size=$(stat -c%s "$apk")
           if [ "$size" -lt 2097152 ]; then
             echo "::error::APK 仅 $size 字节，疑似空壳（正常应 > 50MB）" >&2
