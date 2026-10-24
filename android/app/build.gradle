@@ -21,7 +21,9 @@ android {
 
     defaultConfig {
         applicationId 'com.xiaomayi.tire'
-        minSdk 21
+        // minSdk 24：DCloud 5.33 SDK 的 uni-AD 组件（Funlink_adapter_uniad 等 AAR）要求 minSdk >= 24，
+        // 21 会在清单合并阶段失败；Android 7.0 以下设备占比已趋近于零
+        minSdk 24
         targetSdk 35
         versionCode appVersionCode
         versionName appVersionName
