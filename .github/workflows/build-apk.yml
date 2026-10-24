@@ -44,8 +44,8 @@ on:
         description: 'DCloud 离线 SDK zip 直链；留空则用本仓 sdk tag 的 release 附件 dcloud-sdk.zip'
         required: false
       gradle_version:
-        description: 'Gradle 版本（以 DCloud SDK 文档要求为准，须满足 AGP 8.6.1 最低要求 8.7）'
-        default: '8.7'
+        description: 'Gradle 版本（以 DCloud SDK 文档要求为准，须满足 AGP 8.7.3 最低要求 8.9）'
+        default: '8.9'
 
 permissions:
   contents: read
@@ -134,8 +134,9 @@ jobs:
           fi
           mkdir -p /tmp/dcloud-sdk-unzipped
           unzip -q /tmp/dcloud-sdk.zip -d /tmp/dcloud-sdk-unzipped
-          # SDK zip 内目录层级不定，定位包含 libs/ 的目录
-          libs_dir=$(find /tmp/dcloud-sdk-unzipped -type d -name libs -print -quit)
+          # SDK zip 内目录层级不定，且含多个示例工程的 libs/（UniPlugin-Hello-AS 等），优先取 */SDK/ 下的 libs
+          libs_dir=$(find /tmp/dcloud-sdk-unzipped -type d -name libs -path '*/SDK/*' -print -quit)
+          [ -z "$libs_dir" ] && libs_dir=$(find /tmp/dcloud-sdk-unzipped -type d -name libs -print -quit)
           if [ -z "$libs_dir" ]; then
             echo "::error::SDK zip 内未找到 libs/ 目录，请确认地址指向 DCloud App 离线打包 SDK" >&2
             exit 1
